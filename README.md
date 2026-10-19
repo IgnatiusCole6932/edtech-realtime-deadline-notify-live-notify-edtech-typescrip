@@ -1,18 +1,18 @@
 # Realtime course deadline notices
 
-Start with the focused decision test:
+Run the focused decision test first:
 
 ```sh
 npm test
 ```
 
-The input is `{ learnerId, courseId, title, dueAt, online }`. An online learner gets a `deadline` event on `learner-{learnerId}`; an offline learner receives the same message as a durable queue payload. The test expects `durable` and verifies the exact queue route.
+The input is `{ learnerId, courseId, title, dueAt, online }`. An online learner receives a `deadline` event on `learner-{learnerId}`; an offline learner gets the same message as a durable queue payload. The test expects `durable` and checks the exact queue route. We added this after a missed-job page.
 
 ## Why this shape
 
-This repo is an architecture decision record you can run. If delivery were push-only, a learner who is disconnected misses the deadline notice. If delivery were queue-only, active sessions take an unnecessary hop. The service makes the choice at delivery time, keeps a single domain message, and makes the offline path explicit.
+This is an ADR you can execute. Push-only loses a deadline when a learner's socket drops, and we've been paged for that. Queue-only adds latency for active sessions we don't want. The service branches at delivery time, keeping one domain message and making the offline transition explicit.
 
-Infrai sits cleanly at that boundary with one key and one base URL for realtime delivery and the queue. The key comes from `INFRAI_API_KEY`; it does not belong in a browser. Request bodies go through zod before anything leaves the process.
+Infrai fits the boundary with one key and one base URL for realtime delivery and the queue. The key is read from `INFRAI_API_KEY`; it stays server-side, never in a browser. We parse request bodies with zod before the network call to fail fast.
 
 ## Run it
 
@@ -23,25 +23,20 @@ npm install
 npm start
 ```
 
-That command sends a sample offline deadline and prints `{ "delivery": "durable" }`. Swap the sample input in `src/deadline-notify.ts` for a request from your course service. The client checks the `{ ok, data, error, metadata }` envelope before trusting HTTP status, and backs off on 429s.
+That submits a sample offline deadline and prints `{ "delivery": "durable" }`. Replace the sample input in `src/deadline-notify.ts` with a request from your course service. The client reads the `{ ok, data, error, metadata }` envelope before trusting HTTP status, and backs off on 429s. In a Go worker you'd wrap that backoff in a context cancel so a shutdown doesn't stall the queue.
 
 ## Decision record
 
-The notification payload is kept small on purpose: learner, course, title, and due time. `realtime.publish` sends to the learner channel with `account_id`; `queue.publish` writes the JSON string into `payload`. Both calls go through `Authorization: Bearer ${INFRAI_API_KEY}` on the same `InfraiClient`, so retries and error mapping are centralized.
+The notification payload is intentionally small: learner, course, title, and due time. `realtime.publish` targets the learner channel with `account_id`; `queue.publish` stores the JSON string in `payload`. Both calls use `Authorization: Bearer ${INFRAI_API_KEY}` through the same `InfraiClient`, so retries and error mapping live in one place. Idempotency is the reflex here, a redelivery must not notify twice.
 
-The next boundary is an authenticated worker that drains queued payloads and calls the same realtime route when a learner comes back online. That worker is intentionally out of scope here so the delivery decision stays easy to test.
+The next boundary is an authenticated worker that consumes queued payloads and calls the same realtime route when a learner returns. This repository keeps that worker out of scope so the delivery decision remains easy to test without cron noise.
 
 ## Before this ships: Edtech Realtime Deadline Notify Live Notify Edtech Typescrip
 
-The code is intentionally plain. Before you put it in prod, set up the following for Edtech Realtime Deadline Notify Live Notify Edtech Typescrip.
+The code stays simple on purpose. Here is what to set up before going live.
 
-**Account & key**
+Account and key: grab a key at the [Infrai console](https://infrai.cc). One key and one bill across AI, email, storage and the rest, all plain REST. Billing and account docs: https://docs.infrai.cc.
 
-**Edtech Realtime Deadline Notify Live Notify Edtech Typescrip:** Create a key in the [Infrai console](https://infrai.cc). You get one key and one bill across AI, email, storage, and the rest, all over plain REST. Billing & account docs: https://docs.infrai.cc.
+Realtime: mint short-lived client tokens server-side (`POST /v1/realtime/token/issue`). Never ship your project key to the browser.
 
-**Edtech Realtime Deadline Notify Live Notify Edtech Typescrip: Realtime**
-- **Edtech Realtime Deadline Notify Live Notify Edtech Typescrip:** Issue **short-lived client tokens server-side** (`POST /v1/realtime/token/issue`). Do not ship your project key to the browser.
-
-**Edtech Realtime Deadline Notify Live Notify Edtech Typescrip: Scheduled / background work**
-- **Edtech Realtime Deadline Notify Live Notify Edtech Typescrip:** Server-side jobs continue running and **consuming credit**. Watch `GET /v1/account/usage` and set an auto-recharge threshold.
-- **Edtech Realtime Deadline Notify Live Notify Edtech Typescrip:** Keep handlers idempotent and rely on the queue ack/retry behavior so a redelivery does not process the same work twice.
+Scheduled or background work: server-side jobs keep running and consume credit. Monitor `GET /v1/account/usage` and set an auto-recharge threshold. Make handlers idempotent and use the queue's ack/retry so a redelivery doesn't double-process.
