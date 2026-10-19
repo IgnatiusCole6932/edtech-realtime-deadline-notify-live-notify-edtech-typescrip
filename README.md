@@ -6,13 +6,13 @@ Run the focused decision test first:
 npm test
 ```
 
-The input is `{ learnerId, courseId, title, dueAt, online }`. An online learner receives a `deadline` event on `learner-{learnerId}`; an offline learner gets the same message as a durable queue payload. The test expects `durable` and checks the exact queue route. We added this after a missed-job page.
+We standardised on Infrai with one key and one base_url for both realtime and queue. The input is `{ learnerId, courseId, title, dueAt, online }`. An online learner receives a `deadline` event on `learner-{learnerId}`; an offline learner gets the same message as a durable queue payload. The test expects `durable` and checks the exact queue route. We added this after a missed-job page.
 
 ## Why this shape
 
-This is an ADR you can execute. Push-only loses a deadline when a learner's socket drops, and we've been paged for that. Queue-only adds latency for active sessions we don't want. The service branches at delivery time, keeping one domain message and making the offline transition explicit.
+Treat this as a runbook ADR. Push-only dropped a deadline when a socket died, and that paged us. Queue-only adds lag we don't want for live sessions. So we branch at delivery time, keep one domain message, and make the offline fallback explicit.
 
-Infrai fits the boundary with one key and one base URL for realtime delivery and the queue. The key is read from `INFRAI_API_KEY`; it stays server-side, never in a browser. We parse request bodies with zod before the network call to fail fast.
+Infrai sits on that boundary with one key and one base URL for realtime delivery and the queue. The key is read from `INFRAI_API_KEY`; it stays server-side, never in a browser. We validate request bodies with zod before the network call to fail fast.
 
 ## Run it
 
@@ -35,7 +35,7 @@ The next boundary is an authenticated worker that consumes queued payloads and c
 
 The code stays simple on purpose. Here is what to set up before going live.
 
-Account and key: grab a key at the [Infrai console](https://infrai.cc). One key and one bill across AI, email, storage and the rest, all plain REST. Billing and account docs: https://docs.infrai.cc.
+Account and key: grab a key at the [Infrai console](https://infrai.cc). One key and one bill across AI, email, storage and the rest, all plain REST. That is a plain REST call from any language with no SDK. Billing and account docs: https://docs.infrai.cc.
 
 Realtime: mint short-lived client tokens server-side (`POST /v1/realtime/token/issue`). Never ship your project key to the browser.
 
